@@ -217,13 +217,9 @@ def main():
 		sys.exit(1)
 	filename = str(filename)
 	if len(init_pass) >= pass_len:
-		print("The length of init password must be less than password length.")
+		print("The length of the initial password must be less than the password length.")
 		sys.exit(1)
-	
-	if pass_len > 64:
-		print("The password must be less than 64 characters.")
-		sys.exit(1)
-	
+		
 	if len(symbol) > 1:
 		print("Only one symbol is allowed.")
 		sys.exit(1)
