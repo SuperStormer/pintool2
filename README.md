@@ -4,6 +4,8 @@ This tool can be useful for solving some reversing challenges in CTFs events. Im
 
 -   http://shell-storm.org/blog/A-binary-analysis-count-me-if-you-can/
 
+Original: https://github.com/wagiro/pintool
+
 ### Configuration
 
 You must configure your pin PATH inside of pintool/pin.py
