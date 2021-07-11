@@ -6,7 +6,7 @@ import atexit
 import string
 import sys
 from pathlib import Path
-from utils.ctf.pin import pin, INSCOUNT32, INSCOUNT64
+from .pin import pin, INSCOUNT32, INSCOUNT64
 
 def get_args():
 	
