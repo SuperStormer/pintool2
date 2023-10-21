@@ -8,7 +8,15 @@ Original: https://github.com/wagiro/pintool
 
 ### Configuration
 
-You must configure your pin PATH inside of pintool/pin.py
+Download pin from [the Intel website](https://www.intel.com/content/www/us/en/developer/articles/tool/pin-a-binary-instrumentation-tool-downloads.html), extract the archive, and run the following:
+
+```sh
+cd source/tools/ManualExamples
+make obj-intel64/inscount0.so TARGET=intel64
+make obj-ia32/inscount0.so TARGET=ia32
+```
+
+You should configure your pin path inside of `pintool/pin.py` if it is different from the default:
 
 ```py
 PIN = Path("/opt/pin/pin").expanduser()
@@ -20,30 +28,35 @@ INSCOUNT64 = Path("/opt/pin/source/tools/ManualExamples/obj-intel64/inscount0.so
 
 ```
 $ pintool
-usage: pintool [-h] [-d] [-l LEN] [-c CHARSET_NUM] [-b CHARACTERS] [-a {32,64}] [-i INITPASS] [-s SYMBOL] [-e EXPRESSION] [-r] [-g] filename
+usage: pintool [-h] [-d] [-l LEN] [-c CHARSET] [-b CHARACTERS] [-a {32,64}] [-i INIT_PASS] [-s SYMBOL] [-e EXPRESSION] [-r] [-u] [-g]
+                   filename [additional_args ...]
 
 Program for playing with Pin
 
 positional arguments:
   filename
+  additional_args
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -d, --detect          Detect the password length. For example -d -l 40, with 40 characters
   -l LEN                Length of password
-  -c CHARSET_NUM, --charset CHARSET_NUM
-                        Charset definition for brute force (0-Default, 1-Lowercase, 2-Uppercase, 3-Numbers, 4-Hexadecimal, 5-Punctuation, 6-Printable)
+  -c CHARSET, --charset CHARSET
+                        Charset definition for brute force (default, default2, lower, upper, digit, hex, punct, print)
   -b CHARACTERS, --chars CHARACTERS, --characters CHARACTERS
                         Add characters for the charset. For example, -b _-
   -a {32,64}, --arch {32,64}
                         Program architecture
-  -i INITPASS, --initpass INITPASS
+  -i INIT_PASS, --init INIT_PASS, --init-pass INIT_PASS
                         Initial password characters. For example, -i CTF{
   -s SYMBOL, --symbol SYMBOL
                         Symbol used as password placeholder
   -e EXPRESSION, --expression EXPRESSION
-                        Difference between instructions that are successful or not. For example: -e '== -12', -e '=> 900', -e '<= 17' or -e '!= 32'
-  -r                    Reverse order, bruteforcing starting from the last character
+                        Difference between instructions that are successful or not. For example: -e '== -12', -e '=> 900', -e '<= 17' or -e '!=
+                        32'
+  -r, --reverse         Reverse order, bruteforcing starting from the last character
+  -u, --unordered, --non-ascending
+                        Target program doesn't check chars in ascending order
   -g, --argv            Pass argument via command-line arguments instead of stdin.
 ```
 
@@ -52,7 +65,7 @@ optional arguments:
 **Baleful - picoCTF 2014**
 
 ```sh
-$ python3 pintool.py -l 30 -c 1,2,3 -b _{} -s - examples/baleful
+$ pintool --arch 32 -l 30 -e '== -12' examples/baleful
 p----------------------------- = 763799 difference -12 instructions
 pa---------------------------- = 763787 difference -12 instructions
 pac--------------------------- = 763775 difference -12 instructions
@@ -89,7 +102,7 @@ packers_and_vms_and_xors_oh_my
 **Reverse 400 - Hack You 2014**
 
 ```sh
-$ python3 pintool.py -l 37 -c 4 -i CTF{ -b }_ -s - -e '=> 651' examples/reverse400
+$ pintool --arch 32 -l 37 -c hex -i CTF{ -b }_ -e '>= 900' examples/reverse400
 CTF{c________________________________ = 1057174 difference 1300 instructions
 CTF{c9_______________________________ = 1058474 difference 1300 instructions
 CTF{c9f______________________________ = 1059774 difference 1300 instructions
@@ -126,7 +139,7 @@ CTF{c9fd99de8eb082c66c4ce4039f19c4fc}
 **wyvern 500 - CSAW CTF 2015**
 
 ```sh
-$ python3 pintool.py -c 1,2,3 -b _ -s - -a 64 -l 28 examples/wyvern
+$ pintool -l 28 -e '> 200' examples/wyvern
 d--------------------------- = 1505212 difference 10332 instructions
 dr-------------------------- = 1515830 difference 10618 instructions
 dr4------------------------- = 1521965 difference 6135 instructions

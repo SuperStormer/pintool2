@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 
-import asyncio
 import argparse
+import asyncio
 import atexit
 import string
 import sys
 from pathlib import Path
-from .pin import pin, INSCOUNT32, INSCOUNT64
+from tempfile import TemporaryDirectory
+
+from .pin import INSCOUNT32, INSCOUNT64, pin
 
 def get_args():
 	
@@ -22,11 +24,10 @@ def get_args():
 	parser.add_argument(
 		"-c",
 		"--charset",
-		dest="charset_num",
-		default="0",
+		default="default",
 		help=(
 		"Charset definition for brute force"
-		" (0-Default, 1-Lowercase, 2-Uppercase, 3-Numbers, 4-Hexadecimal, 5-Punctuation, 6-Printable)"
+		" (default, default2, lower, upper, digit, hex, punct, print)"
 		)
 	)
 	parser.add_argument(
@@ -41,7 +42,12 @@ def get_args():
 		"-a", "--arch", default="64", help="Program architecture", choices=["32", "64"]
 	)
 	parser.add_argument(
-		"-i", "--initpass", default="", help="Initial password characters. For example, -i CTF{"
+		"-i",
+		"--init",
+		"--init-pass",
+		dest="init_pass",
+		default="",
+		help="Initial password characters. For example, -i CTF{"
 	)
 	parser.add_argument("-s", "--symbol", default="-", help="Symbol used as password placeholder")
 	parser.add_argument(
@@ -55,20 +61,30 @@ def get_args():
 	)
 	parser.add_argument(
 		"-r",
-		dest="reverse",
+		"--reverse",
 		action="store_true",
 		default=False,
 		help="Reverse order, bruteforcing starting from the last character"
 	)
 	parser.add_argument(
+		"-u",
+		"--unordered",
+		"--non-ascending",
+		dest="ascending",
+		action="store_false",
+		default=True,
+		help="Target program doesn't check chars in ascending order"
+	)
+	parser.add_argument(
 		"-g",
 		"--argv",
-		dest="argv",
+		dest="use_argv",
 		action="store_true",
 		default=False,
 		help="Pass argument via command-line arguments instead of stdin."
 	)
 	parser.add_argument("filename", type=Path)
+	parser.add_argument("additional_args", nargs="*")
 	
 	if len(sys.argv) < 2:
 		parser.print_help()
@@ -76,26 +92,46 @@ def get_args():
 	
 	return parser.parse_args()
 
-def get_charset(charset_num, additional):
+def get_charset(charset_str, additional):
 	charsets = {
-		"0":
-		string.ascii_lowercase + "_{}" + string.digits + string.ascii_uppercase +
+		"default":
+		string.ascii_lowercase + "_" + string.digits + "{}" + string.ascii_uppercase +
 		string.punctuation.translate(str.maketrans("", "", "_{}")),
-		"1":
+		"default2":
+		string.ascii_lowercase + "_" + string.digits + "{}",
+		"lower":
 		string.ascii_lowercase,
-		"2":
+		"upper":
 		string.ascii_uppercase,
-		"3":
+		"digit":
 		string.digits,
-		"4":
-		string.hexdigits,
-		"5":
+		"hex":
+		string.digits + "abcdef",
+		"punct":
 		string.punctuation,
-		"6":
+		"print":
 		string.printable
 	}
 	
-	return "".join(charsets[n] for n in charset_num.split(",")) + "".join(additional)
+	return "".join(charsets[name] for name in charset_str.split(",")) + "".join(additional)
+
+def get_cmp_func(expression):
+	comparison, number = expression.split(" ")
+	number = int(number)
+	try:
+		cmp_func = {
+			"!=": lambda diff: diff != number,
+			"<=": lambda diff: diff <= number,
+			">=": lambda diff: diff >= number,
+			"=>": lambda diff: diff >= number,
+			"==": lambda diff: diff == number,
+			">": lambda diff: diff > number,
+			"<": lambda diff: diff < number,
+		}[comparison]
+	except KeyError:
+		print("Unknown value for -e option")
+		sys.exit(1)
+	return cmp_func
 
 async def detect_length(filename, inscount_file, max_len, symbol="-", argv=False):
 	initial = None
@@ -108,94 +144,86 @@ async def detect_length(filename, inscount_file, max_len, symbol="-", argv=False
 		
 		print(f"{password} = with {i} characters difference {inscount - initial} instructions")
 
-def add_char(init_pass, char, reverse=False):
-	
-	if reverse:
-		init_pass = char + init_pass
-	else:
-		init_pass += char
-	
-	return init_pass
-
-def get_password(temp_password, char, i, reverse):
-	if reverse:
-		return temp_password[:i - 1] + char + temp_password[i:]
-	else:
-		return temp_password[:i] + char + temp_password[i + 1:]
+def get_password(password, char, i):
+	return password[:i] + char + password[i + 1:]
 
 async def solve(
 	filename,
 	inscount_file,
 	pass_len,
 	charset,
-	expression,
+	cmp_func,
 	symbol="-",
 	init_pass="",
+	additional_args=None,
 	reverse=False,
-	argv=False
+	ascending=True,
+	use_argv=False,
 ):
-	password = None
-	init_len = len(init_pass)
-	comparison, number = expression.split(" ")
-	number = int(number)
-	try:
-		cmp_func = {
-			"!=": lambda diff: diff != number,
-			"<=": lambda diff: diff <= number,
-			">=": lambda diff: diff >= number,
-			"=>": lambda diff: diff >= number,
-			"==": lambda diff: diff == number
-		}[comparison]
-	except KeyError:
-		print("Unknown value for -d option")
-		sys.exit(1)
-	semaphore = asyncio.Semaphore(5)  #rate limit
+	if additional_args is None:
+		additional_args = []
 	
-	async def helper(initial, val, char):
-		async with semaphore:
-			inscount = await pin(filename, inscount_file, val, argv, f"inscount{char}.out")
-			diff = inscount - initial
-			print(f"{val} = {inscount} difference {diff} instructions")
-			return cmp_func(diff), char
-	
-	for i in range(init_len, pass_len):
+	with TemporaryDirectory() as tempdir:
+		semaphore = asyncio.Semaphore(5)  # rate limit
 		
-		if reverse:
-			temp_password = symbol * (pass_len - i) + init_pass
-		else:
-			temp_password = init_pass + symbol * (pass_len - i)
+		async def helper(initial, val, char):
+			async with semaphore:
+				inscount = await pin(
+					filename, inscount_file, val, additional_args, use_argv,
+					f"{tempdir}/inscount{char}.out"
+				)
+				diff = inscount - initial
+				print(f"{val} = {inscount} difference {diff} instructions")
+				return cmp_func(diff), char
 		
-		if reverse:
-			i = pass_len - i
-		#get initial
-		char = charset[0]
-		initial = await pin(
-			filename, inscount_file, get_password(temp_password, char, i, reverse), argv
-		)
+		init_len = len(init_pass)
+		password = init_pass + symbol * (pass_len - init_len)
 		
-		coros = [
-			asyncio.create_task(
-			helper(initial, get_password(temp_password, char, i, reverse), char)
-			) for char in charset
-		]
-		for coro in asyncio.as_completed(coros):
-			success, char = await coro
-			if success:
-				for coro2 in coros:
-					coro2.cancel()
-				init_pass = add_char(init_pass, char, reverse)
-				password = get_password(temp_password, char, i, reverse)
-				print(password)
+		while True:
+			r = range(init_len, pass_len)
+			if reverse:
+				r = reversed(r)
+			
+			for i in r:
+				# continue if current char is already filled in
+				if password[i] != symbol:
+					continue
+				
+				#get initial instruction count
+				initial = await pin(
+					filename, inscount_file, get_password(password, symbol, i), additional_args,
+					use_argv, f"{tempdir}/inscount.out"
+				)
+				
+				coros = [
+					asyncio.create_task(helper(initial, get_password(password, char, i), char))
+					for char in charset
+				]
+				
+				for coro in asyncio.as_completed(coros):
+					success, char = await coro
+					if success:
+						for coro2 in coros:
+							coro2.cancel()
+						password = get_password(password, char, i)
+						print(password)
+						break
+				else:
+					if ascending:
+						print("Password not found, try changing charsets")
+						sys.exit(1)
+					else:  # if the password is checked in a non-ascending order, we try the next index
+						continue
+				# valid character was found
 				break
-		else:
-			print("Password not found, try to change charset...")
-			sys.exit(1)
-	
-	return password
+			
+			# all password characters are filled in
+			if symbol not in password:
+				# allow task cancellations to be processed
+				await asyncio.sleep(0)
+				return password
 
 def cleanup():
-	for path in Path.cwd().glob("inscount*.out"):
-		path.unlink()
 	path = Path("pin.log")
 	if path.exists():
 		path.unlink()
@@ -203,30 +231,30 @@ def cleanup():
 def main():
 	args = get_args()
 	
-	init_pass = args.initpass
-	pass_len = args.len
 	symbol = args.symbol
-	charset = symbol + get_charset(args.charset_num, args.characters)
-	arch = args.arch
-	expression = args.expression.strip()
-	detect = args.detect
-	argv = args.argv
+	charset = get_charset(args.charset, args.characters)
+	
 	filename = args.filename.resolve()
 	if not filename.exists():
 		print("File does not exist.")
 		sys.exit(1)
 	filename = str(filename)
+	
+	init_pass = args.init_pass
+	pass_len = args.len
 	if len(init_pass) >= pass_len:
 		print("The length of the initial password must be less than the password length.")
 		sys.exit(1)
-		
+	
 	if len(symbol) > 1:
 		print("Only one symbol is allowed.")
 		sys.exit(1)
 	
-	if arch == "32":
+	cmp_func = get_cmp_func(args.expression.strip())
+	
+	if args.arch == "32":
 		inscount_file = INSCOUNT32
-	elif arch == "64":
+	elif args.arch == "64":
 		inscount_file = INSCOUNT64
 	else:
 		print("Unknown architecture")
@@ -234,16 +262,16 @@ def main():
 	
 	atexit.register(cleanup)
 	
-	if detect:
-		asyncio.run(detect_length(filename, inscount_file, pass_len, symbol, argv))
+	if args.detect:
+		asyncio.run(detect_length(filename, inscount_file, pass_len, symbol, args.use_argv))
 	else:
 		password = asyncio.run(
 			solve(
-			filename, inscount_file, pass_len, charset, expression, symbol, init_pass, args.reverse,
-			argv
+			filename, inscount_file, pass_len, charset, cmp_func, symbol, init_pass,
+			args.additional_args, args.reverse, args.ascending, args.use_argv
 			)
 		)
-		print("Password: ", password)
+		print("Password:", password)
 
 if __name__ == "__main__":
 	main()
