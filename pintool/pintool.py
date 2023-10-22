@@ -2,13 +2,12 @@
 
 import argparse
 import asyncio
-import atexit
 import string
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from .pin import INSCOUNT32, INSCOUNT64, pin
+from .pin import pin
 
 def get_args():
 	
@@ -149,7 +148,7 @@ def get_password(password, char, i):
 
 async def solve(
 	filename,
-	inscount_file,
+	arch,
 	pass_len,
 	charset,
 	cmp_func,
@@ -169,8 +168,7 @@ async def solve(
 		async def helper(initial, val, char):
 			async with semaphore:
 				inscount = await pin(
-					filename, inscount_file, val, additional_args, use_argv,
-					f"{tempdir}/inscount{char}.out"
+					filename, arch, val, additional_args, use_argv, f"{tempdir}/inscount{char}.out"
 				)
 				diff = inscount - initial
 				print(f"{val} = {inscount} difference {diff} instructions")
@@ -191,8 +189,8 @@ async def solve(
 				
 				#get initial instruction count
 				initial = await pin(
-					filename, inscount_file, get_password(password, symbol, i), additional_args,
-					use_argv, f"{tempdir}/inscount.out"
+					filename, arch, get_password(password, symbol, i), additional_args, use_argv,
+					f"{tempdir}/inscount.out"
 				)
 				
 				coros = [
@@ -252,26 +250,25 @@ def main():
 	
 	cmp_func = get_cmp_func(args.expression.strip())
 	
-	if args.arch == "32":
-		inscount_file = INSCOUNT32
-	elif args.arch == "64":
-		inscount_file = INSCOUNT64
-	else:
+	arch = args.arch
+	if arch not in ["32", "64"]:
 		print("Unknown architecture")
 		sys.exit(1)
 	
-	atexit.register(cleanup)
-	
-	if args.detect:
-		asyncio.run(detect_length(filename, inscount_file, pass_len, symbol, args.use_argv))
-	else:
-		password = asyncio.run(
-			solve(
-			filename, inscount_file, pass_len, charset, cmp_func, symbol, init_pass,
-			args.additional_args, args.reverse, args.ascending, args.use_argv
+	try:
+		
+		if args.detect:
+			asyncio.run(detect_length(filename, arch, pass_len, symbol, args.use_argv))
+		else:
+			password = asyncio.run(
+				solve(
+				filename, arch, pass_len, charset, cmp_func, symbol, init_pass,
+				args.additional_args, args.reverse, args.ascending, args.use_argv
+				)
 			)
-		)
-		print("Password:", password)
+			print("Password:", password)
+	finally:
+		cleanup()
 
 if __name__ == "__main__":
 	main()

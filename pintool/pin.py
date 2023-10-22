@@ -21,11 +21,11 @@ def _read_output(out_file):
 		output = f.read()
 	return int(output.partition(" ")[2])
 
-def pin_sync(
-	filename, inscount, val, additional_args=None, use_argv=False, out_file="inscount.out"
-):
+def pin_sync(filename, arch, val, additional_args=None, use_argv=False, out_file="inscount.out"):
 	if additional_args is None:
 		additional_args = []
+	
+	inscount = {"64": INSCOUNT64, "32": INSCOUNT32}[arch]
 	
 	if use_argv:
 		subprocess.run(
@@ -46,11 +46,11 @@ def pin_sync(
 	_show_log()
 	return _read_output(out_file)
 
-async def pin(
-	filename, inscount, val, additional_args=None, use_argv=False, out_file="inscount.out"
-):
+async def pin(filename, arch, val, additional_args=None, use_argv=False, out_file="inscount.out"):
 	if additional_args is None:
 		additional_args = []
+	
+	inscount = {"64": INSCOUNT64, "32": INSCOUNT32}[arch]
 	
 	if use_argv:
 		process = await asyncio.create_subprocess_exec(
