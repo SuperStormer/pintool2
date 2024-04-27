@@ -181,17 +181,24 @@ async def solve(
 
 		async def helper(initial, val, char):
 			async with semaphore:
-				inscount = await pin(
-					filename,
-					arch,
-					val,
-					additional_args,
-					use_argv,
-					f"{tempdir}/inscount{char}.out",
-				)
-				diff = inscount - initial
-				print(f"{val} = {inscount} difference {diff} instructions")
-				return cmp_func(diff), char
+				try:
+					inscount = await asyncio.wait_for(
+						pin(
+							filename,
+							arch,
+							val,
+							additional_args,
+							use_argv,
+							f"{tempdir}/inscount{char}.out",
+						),
+						timeout=10,
+					)
+					diff = inscount - initial
+					print(f"{val} = {inscount} difference {diff} instructions")
+					return cmp_func(diff), char
+				except FileNotFoundError:
+					print(f"{val} timed out")
+					return False, char
 
 		init_len = len(init_pass)
 		password = init_pass + symbol * (pass_len - init_len)
